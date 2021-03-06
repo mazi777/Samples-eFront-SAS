@@ -1,0 +1,1756 @@
+//calculation program
+//MC_FUND_OP_INVESTOR_LEVEL
+
+// CALCULATION PROGRAM FOR FUND OPERATIONS SENSE CHECK - INVESTOR LEVEL
+
+//Created by: Agnieszka Mazurek
+
+LIBNAME USER ".";
+
+ 
+
+ 
+
+/*****************************************************************************************************************************************************
+
+INCLUDE REQUIRED PARAMETERS TO CREATE REPORT
+
+*****************************************************************************************************************************************************/
+
+ 
+
+%INCLUDE "\\eFront (Shared)\Migration\A01 Progs - P\MP_FOLDER_LINKS";
+
+%INCLUDE "\\eFront (Shared)\Migration\A01 Progs - P\MP_GET_CURRENT_PROFILE";
+
+%INCLUDE "\\eFront (Shared)\Migration\A01 Progs - P\MP_FUND_MULTIPLE";
+
+%INCLUDE "\\eFront (Shared)\Migration\A01 Progs - P\MP_START_DATE";
+
+%INCLUDE "\\eFront (Shared)\Migration\A01 Progs - P\MP_END_DATE";
+
+%INCLUDE "\\eFront (Shared)\Migration\A01 Progs - P\MP_MODIFIED_DATE_FROM";
+
+%INCLUDE "\\eFront (Shared)\Migration\A01 Progs - P\MP_MODIFIED_DATE_TO";
+
+%INCLUDE "\\eFront (Shared)\Migration\A02 Progs - DE\MDE_FA_QUERY2";
+
+%INCLUDE "\\eFront (Shared)\Migration\A02 Progs - DE\MDE_FA_QUERY3_FundOp_INVESTOR_GL";
+
+%INCLUDE "\\eFront (Shared)\Migration\A02 Progs - DE\MDE_FA_QUERY4_FundOp_INVESTOR";
+
+ 
+
+//TO COUNT NUMBER OF ALL EXISTING FUNDS (unique values)
+
+PROC SORT DATA=WORK.T_FUNDS_COUNT (KEEP=IQID)
+
+NODUPKEY;
+
+BY IQID;
+
+RUN;
+
+ 
+
+/*
+
+PROC PRINT;
+
+PUT TABLENOBS("WORK.T_FUNDS_COUNT"); RUN;
+
+*/
+
+ 
+
+// PARAMETERS to apply
+
+DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+SET WORK.T_FUND_OP_INVESTOR_LEVEL (WHERE (EFFECTIVE_DATE >= %PARAM_SQL_START_DATE AND EFFECTIVE_DATE <= %PARAM_SQL_END_DATE));
+
+COLUMN MODIF_ON TYPE=DATE;
+
+MODIF_ON = LEFT(MODIFIED_ON,10);
+
+RUN;
+
+ 
+
+DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+SET WORK.T_FUND_OP_INVESTOR_LEVEL (WHERE (MODIF_ON>=%PARAM_SQL_MODIFIED_DATE_FROM AND MODIF_ON<=%PARAM_SQL_MODIFIED_DATE_TO ));
+
+OUTPUT;
+
+RUN;
+
+ 
+
+                       
+
+// ACTION ONLY IF SOME FUNDs WERE CHOSEN FROM PARAMETERS LIST BUT NOT ALL FUNDs WERE CHOSEN FROM PARAMETERS LIST           
+
+%IF  (TABLENOBS("WORK.T_COLLECTION_STRING")>0 AND (TABLENOBS("WORK.T_COLLECTION_STRING")<TABLENOBS("WORK.T_FUNDS_COUNT")))
+
+%THEN
+
+ 
+
+     DATA WORK.T_COLLECTION_STRING (RENAME = (PARAM_SQL_FUND_IQID = FUND_IQID));
+
+     SET WORK.T_COLLECTION_STRING;
+
+     RUN;
+
+ 
+
+     DATA WORK.T_FUND_OP_INVESTOR_LEVEL_COPY;
+
+     MERGE WORK.T_COLLECTION_STRING  (IN = T1)  WORK.T_FUND_OP_INVESTOR_LEVEL(IN = T2);
+
+     BY FUND_IQID;
+
+     _OUTPUT_ = T1 AND T2;
+
+     RUN;
+
+                       
+
+     DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+     SET WORK.T_FUND_OP_INVESTOR_LEVEL_COPY;
+
+     RUN;
+
+ 
+
+%END;
+
+ 
+
+// CHECK IF NOT TOO MUCH DATA TO PROCESS, IF YES, THEN INFORM USER THAT THE DATA SHOULD BE LIMITED
+
+%IF TABLENOBS("WORK.T_FUND_OP_INVESTOR_LEVEL")<200000
+
+%THEN     
+
+     %DEFINE READY_TO_PROCESS;
+
+     PROC SORT DATA = WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+     BY
+
+     FUND
+
+            COMPLETE_SHARE_NAME
+
+     EFFECTIVE_DATE
+
+     INDEX;
+
+     RUN;
+
+                       
+
+     // 1.Check if SHARE ISSUE fund op is not mixed with COMMITMENT fund op within the same share
+
+     DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+     SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+ 
+
+     COLUMN CONCAT TYPE=STRING;
+
+     CONCAT = FUND_IQID & COMPLETE_SHARE_NAME & TYPE;
+
+     RUN;
+
+                       
+
+     DATA WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP (KEEP=CONCAT FUND_IQID COMPLETE_SHARE_NAME TYPE);
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                            
+
+     IF TYPE=150 OR TYPE=100 THEN
+
+                OUTPUT;
+
+            END;
+
+           
+
+            RUN;
+
+                                               
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP (KEEP=CONCAT FUND_IQID COMPLETE_SHARE_NAME CONCAT1 TYPE);
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP;
+
+                       
+
+     COLUMN CONCAT1 TYPE=STRING;
+
+ 
+
+     CONCAT1 = FUND_IQID & COMPLETE_SHARE_NAME;
+
+                       
+
+     RUN;
+
+ 
+
+     PROC SORT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP
+
+     NODUPKEY;
+
+     BY CONCAT;
+
+            RUN;
+
+                                               
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP;
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP;
+
+               
+
+     COLUMN  FUNDOP_TYPE_VS_SHARE_CHECK TYPE=STRING;
+
+                                               
+
+            IF CONCAT1=LAG(CONCAT1) THEN
+
+        IF TYPE<>LAG(TYPE) THEN
+
+                   FUNDOP_TYPE_VS_SHARE_CHECK = "FALSE";
+
+                END;
+
+            END;              
+
+            RUN;
+
+                       
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+            MERGE WORK.T_FUND_OP_INVESTOR_LEVEL (IN=T1) WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP (IN=T2);
+
+            BY CONCAT;
+
+            _OUTPUT_=T1;
+
+            RUN;
+
+                       
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL (DROP=CONCAT CONCAT1);
+
+     SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                                   
+
+     IF FUNDOP_TYPE_VS_SHARE_CHECK="" THEN
+
+                FUNDOP_TYPE_VS_SHARE_CHECK = "TRUE";
+
+            END;
+
+            RUN;
+
+                       
+
+     // 1.1. COUNT NUMBER OF ISSUES PER FUND_OP_IQID WHEN: SHARE ISSUE fund op is mixed with COMMITMENT fund op within the same share
+
+     DATA WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP2 (KEEP=ID FUNDOP_TYPE_VS_SHARE_CHECK);
+
+     SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+            IF FUNDOP_TYPE_VS_SHARE_CHECK="FALSE" THEN
+
+                        OUTPUT;
+
+            END;
+
+                       
+
+            RUN;
+
+                       
+
+            // non duplicated occurrences
+
+            PROC SORT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP2
+
+            NODUPKEY;
+
+            BY ID;
+
+            RUN;
+
+                       
+
+            //SHARE ISSUES COUNT:  N statement counts number of occurrences. Result in column: ID_N - THIS COUNTS HOW MANY ISSUES IS WHEN: SHARE ISSUE fund op is mixed with COMMITMENT fund op within the same share
+
+            PROC MEANS DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP2;
+
+            N ID;
+
+            RUN;
+
+                       
+
+     //PROC PRINT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP2; RUN;           
+
+           
+
+                       
+
+            // GL Entries generation for IF fund ops - check
+
+                       
+
+            /* RULES
+
+                       
+
+            1. FOR IF FUNDS, WHICH HAVE GENERAL LEDGER (this is not the case normally from the accounting point of view, but from the system point of view it is possible):                    
+
+                        - when investor has no General Ledger - no GL entries will be generated for IF fund op
+
+                        - when investor has a General Ledger then rules for GL entries are as follow:
+
+                           - IF: Commitment - YES
+
+                           - IF: CALL - YES
+
+                           - IF: ROC - YES
+
+                           - IF: DISTRIBUTION - YES
+
+                           - IF: STOCK DISTR. - YES
+
+                           - IF: ACCOUNTING VALUATION - YES
+
+                           - IF: OFFICIAL NAV - NO
+
+                           - IF: LIQUIDATION - YES but only if at least one of the adjustment position is filled in: GL COST, GL Realised Investment Gain/(Loss), GL Realised FX Gain/(Loss), GL Unrealised Investment Gain/(Loss), GL Unrealised FX Gain/(Loss)
+
+                           - IF: SECONDARY PURCHASE - YES but only if purchase price <>0
+
+                           - IF: SECONDARY SALE - YES
+
+                          
+
+             2. FOR IF FUNDS, WHICH DO NOT HAVE GENERAL LEDGER: 
+
+                         - when investor has no General Ledger - no GL entries will be generated for IF fund op
+
+                        - when investor has a General Ledger then rules for GL entries are as follow:
+
+                           - IF: Commitment - NO
+
+                           - IF: CALL - YES
+
+                           - IF: ROC - YES
+
+                           - IF: DISTRIBUTION - YES
+
+                           - IF: STOCK DISTR. - YES
+
+                           - IF: ACCOUNTING VALUATION - YES
+
+                           - IF: OFFICIAL NAV - NO
+
+                           - IF: LIQUIDATION - YES but only if at least one of the adjustment position is filled in: GL COST, GL Realised Investment Gain/(Loss), GL Realised FX Gain/(Loss), GL Unrealised Investment Gain/(Loss), GL Unrealised FX Gain/(Loss)
+
+                           - IF: SECONDARY PURCHASE - YES but only if purchase price <>0
+
+                           - IF: SECONDARY SALE - YES
+
+                                   
+
+            */
+
+                       
+
+     //2. ADD INFO ABOUT GENERAL LEDGERS
+
+     //IQID_2 = IQID of a Fund
+
+     //COMPANY_IQID = IQID of a Company
+
+     DATA WORK.T_FUND_OP_INVESTOR_LEVEL_GL;
+
+     SET WORK.T_FUND_OP_INVESTOR_LEVEL_GL;
+
+                       
+
+     COLUMN COMBINED_IQID TYPE=STRING;
+
+     IF IQID_2="" THEN
+
+        COMBINED_IQID=COMPANY_IQID;
+
+     ELSE COMBINED_IQID=IQID_2;
+
+     END;
+
+            RUN;              
+
+   
+
+     DATA WORK.T_FUND_OP_INVESTOR_LEVEL_GL (RENAME = (COMBINED_IQID = FUND_IQID));
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL_GL;
+
+                       
+
+            COLUMN INVESTOR_IQID TYPE=STRING;
+
+            INVESTOR_IQID=COMBINED_IQID;
+
+                       
+
+            RUN;
+
+                       
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL_GL_FUND
+
+            (KEEP=FUND_IQID GL_FUND);
+
+     SET WORK.T_FUND_OP_INVESTOR_LEVEL_GL;
+
+                       
+
+            COLUMN GL_FUND TYPE=STRING;
+
+                                               
+
+            GL_FUND = "TRUE";
+
+            RUN;
+
+                       
+
+     DATA WORK.T_FUND_OP_INVESTOR_LEVEL_GL_INVESTOR
+
+            (KEEP=INVESTOR_IQID GL_INVESTOR);
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL_GL;
+
+                       
+
+            COLUMN GL_INVESTOR TYPE=STRING;
+
+                       
+
+            GL_INVESTOR = "TRUE";
+
+            RUN;
+
+                       
+
+            //2.1. PLACE IQID OF INVESTOR IN ONE COLUMN
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+            COLUMN INVESTOR_IQID TYPE=STRING;
+
+            INVESTOR_IQID = INVESTOR_IQID_FUND & INVESTOR_IQID_INVESTOR & INVESTOR_IQID_COMPANY;
+
+            RUN;
+
+                       
+
+     //2.2. MERGE GL INFO WITH THE TABLE FOR FUND OP_INVESTOR_LEVEL
+
+            //limit table only to IF (GLs check only for Investee Funds, Managed Funds are checked on Fund Op Level report)
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL_GL_WORKFILE;
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+            IF FUND_STATUS_CODE=213 THEN
+
+                        OUTPUT;
+
+            END;
+
+            RUN;
+
+                       
+
+     //MERGING AND LIMITING TABLE TO GL_INVESTOR=TRUE (~INVESTOR HAS General Ledger assigned)                
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL_GL_WORKFILE;
+
+            MERGE WORK.T_FUND_OP_INVESTOR_LEVEL_GL_WORKFILE (IN=T1) WORK.T_FUND_OP_INVESTOR_LEVEL_GL_FUND (IN=T2);
+
+            BY FUND_IQID;
+
+            _OUTPUT_=T1;
+
+            RUN;              
+
+                       
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL_GL_WORKFILE;
+
+            MERGE WORK.T_FUND_OP_INVESTOR_LEVEL_GL_WORKFILE (IN=T1) WORK.T_FUND_OP_INVESTOR_LEVEL_GL_INVESTOR (IN=T2);
+
+            BY INVESTOR_IQID;
+
+            _OUTPUT_=T1;
+
+            RUN;  
+
+                                   
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL_GL_WORKFILE;
+
+     SET WORK.T_FUND_OP_INVESTOR_LEVEL_GL_WORKFILE;                   
+
+                       
+
+            IF GL_FUND = "" THEN
+
+                        GL_FUND ="FALSE";
+
+            END;
+
+                       
+
+            IF GL_INVESTOR = "TRUE" THEN
+
+                        OUTPUT;
+
+            END;
+
+                                   
+
+            RUN;
+
+                       
+
+            //MERGING COLUMNS: GL_INVESTOR and GL_FUND to the final table: WORK.T_FUND_OP_INVESTOR_LEVEL
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+            MERGE WORK.T_FUND_OP_INVESTOR_LEVEL (IN=T1) WORK.T_FUND_OP_INVESTOR_LEVEL_GL_FUND (IN=T2);
+
+            BY FUND_IQID;
+
+            _OUTPUT_=T1;
+
+            RUN;  
+
+                       
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+            MERGE WORK.T_FUND_OP_INVESTOR_LEVEL (IN=T1) WORK.T_FUND_OP_INVESTOR_LEVEL_GL_INVESTOR (IN=T2);
+
+            BY INVESTOR_IQID;
+
+            _OUTPUT_=T1;
+
+            RUN;  
+
+                                   
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+     SET WORK.T_FUND_OP_INVESTOR_LEVEL;                     
+
+                       
+
+            IF GL_FUND = "" THEN
+
+                        GL_FUND ="FALSE";
+
+            END;
+
+                       
+
+            IF GL_INVESTOR = "" THEN
+
+        GL_INVESTOR ="FALSE";
+
+            END;
+
+                                   
+
+            RUN;              
+
+                       
+
+            //2.3. checking if GL entries should be generated for: IF:Secondary Purchase, IF:Liquidation, IF:Commitment, IF: OFFICIAL NAV and other IF fund ops          
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL_GL_WORKFILE;
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL_GL_WORKFILE;
+
+                       
+
+            COLUMN GL_FOR_FUND_OP TYPE=STRING;
+
+                       
+
+            //IF:Liquidation
+
+            IF TYPE=(-250) THEN
+
+                        IF (GL_COST<>"" OR GL_UNREALIZED_INVESTMENT_GAIN_LOSS<>"" OR GL_UNREALIZED_FX_GAIN_LOSS<>"" OR GL_REALIZED_INVESTMENT_GAIN_LOSS <>"" OR GL_REALIZED_FX_GAIN_LOSS<>"")                            THEN
+
+                           GL_FOR_FUND_OP="TRUE";
+
+                        ELSE GL_FOR_FUND_OP="FALSE";
+
+                        END;
+
+     END;
+
+ 
+
+            //IF:Secondary Purchase
+
+            IF TYPE=277 AND Fund_Sec_Purchase_Price<>""  THEN
+
+                        GL_FOR_FUND_OP="TRUE";
+
+            ELSE IF TYPE=277 AND Fund_Sec_Purchase_Price="" THEN
+
+                        GL_FOR_FUND_OP="FALSE";
+
+            END;
+
+     END;
+
+                       
+
+            //IF:COMMITMENT
+
+            IF TYPE=200 AND GL_FUND="TRUE" THEN
+
+                        GL_FOR_FUND_OP="TRUE";
+
+     ELSE IF TYPE=200 AND GL_FUND="FALSE" THEN
+
+                        GL_FOR_FUND_OP="FALSE";
+
+            END;
+
+            END;
+
+                       
+
+            //IF: OFFICIAL NAV
+
+            IF TYPE=230 THEN
+
+                GL_FOR_FUND_OP="FALSE";
+
+            END;
+
+                       
+
+            //OTHER IF FUND OPERATIONS
+
+            IF TYPE<>200 AND TYPE<>277 AND TYPE<>-250 AND TYPE<>230 THEN
+
+                GL_FOR_FUND_OP="TRUE";          
+
+            END;
+
+                       
+
+            RUN;
+
+     //PROC PRINT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_GL_WORKFILE; RUN;           
+
+ 
+
+     //2.4. FINAL RESULT FOR CHECK IF INVESTMENT FUNDS' fund operations should have GL ENTRIES
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL_GL_WORKFILE (KEEP=ID GL_FOR_FUND_OP CONCAT_ID_GL_FOR_FUND_OP);
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL_GL_WORKFILE;                       
+
+                       
+
+            COLUMN CONCAT_ID_GL_FOR_FUND_OP TYPE=STRING;
+
+            CONCAT_ID_GL_FOR_FUND_OP = ID & GL_FOR_FUND_OP;
+
+            RUN;
+
+                       
+
+            PROC SORT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_GL_WORKFILE
+
+     NODUPKEY;
+
+     BY
+
+             CONCAT_ID_GL_FOR_FUND_OP;
+
+            RUN;
+
+                       
+
+            //If several values correspond to a class of values, the LAST statement creates a new column and displays the last corresp. value
+
+            // new column created is the final information if GL entries should be created for a fund op or not
+
+            // this new column name:  GL_FOR_FUND_OP_LAST
+
+            PROC MEANS DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_GL_WORKFILE OUT=WORK.T_FUND_OP_INVESTOR_LEVEL_GL_WORKFILE_FINAL;
+
+            CLASS ID;
+
+            LAST GL_FOR_FUND_OP;
+
+            RUN;
+
+                       
+
+     //PROC PRINT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_GL_WORKFILE_FINAL; RUN;
+
+ 
+
+            //2.5. MERGE  COLUMN="GL_FOR_FUND_OP_LAST" TO FINAL TABLE=WORK.T_FUND_OP_INVESTOR_LEVEL
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+            MERGE WORK.T_FUND_OP_INVESTOR_LEVEL (IN=T1) WORK.T_FUND_OP_INVESTOR_LEVEL_GL_WORKFILE_FINAL (IN=T2);
+
+            BY ID;
+
+            _OUTPUT_=T1;
+
+            RUN;
+
+                       
+
+            //2.6. FILL IN MISSING VALUES FOR COLUMN="GL_FOR_FUND_OP_LAST"
+
+            //FUND_STATUS_CODE=113 -> MF, 213 -> IF
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+            IF FUND_STATUS_CODE=113 THEN
+
+        GL_FOR_FUND_OP_LAST="N/A";
+
+            END;
+
+                       
+
+            IF FUND_STATUS_CODE=213 AND GL_FOR_FUND_OP_LAST="" THEN
+
+        GL_FOR_FUND_OP_LAST="FALSE";
+
+            END;
+
+                       
+
+            RUN;
+
+                       
+
+     //2.7 EDITING COLUMN="GL_FOR_FUND_OP_LAST" in regards to the fact if fund operation is DRAFTED or not (then we will have final info if GL entries should be generated or not)
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+ 
+
+            IF DRAFT="TRUE" AND FUND_STATUS_CODE=213 THEN
+
+                        GL_FOR_FUND_OP_LAST="FALSE";
+
+            END;  
+
+            RUN;
+
+                       
+
+            // 2.8. CHECK IF GL ENTRIES ARE CORRECTLY GENERATED (COMPARE COLUMNS: GL_FOR_FUND_OP_LAST vs. EXPRESSION) - ONLY FOR Investment Funds
+
+            // RESULT IN COLUMN: GL_ENTRIES_IF_CHECK
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+            COLUMN GL_ENTRIES_IF_CHECK TYPE=STRING;
+
+                       
+
+            IF GL_FOR_FUND_OP_LAST="N/A" THEN
+
+                        GL_ENTRIES_IF_CHECK="N/A";
+
+            END;
+
+                       
+
+            IF EXPRESSION=GL_FOR_FUND_OP_LAST THEN
+
+                        GL_ENTRIES_IF_CHECK="TRUE";
+
+            END;
+
+                       
+
+            IF GL_ENTRIES_IF_CHECK="" THEN
+
+                GL_ENTRIES_IF_CHECK="FALSE";
+
+            END;
+
+                       
+
+            RUN;              
+
+               
+
+     //PROC PRINT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL; RUN;
+
+ 
+
+     // 2.9. COUNT NUMBER OF ISSUES PER FUND_OP_IQID WHEN: GL ENTRIES should be generated but they are not and the other way round
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP3 (KEEP=ID GL_ENTRIES_IF_CHECK);
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+            IF GL_ENTRIES_IF_CHECK="FALSE" THEN
+
+                        OUTPUT;
+
+            END;
+
+            RUN;
+
+ 
+
+            // non duplicated occurrences
+
+            PROC SORT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP3
+
+            NODUPKEY;
+
+            BY ID;
+
+            RUN;
+
+                       
+
+            //GL issues count: N statement counts number of occurrences. Result in column: ID_N - THIS COUNTS HOW MANY ISSUES IS WHEN: GL ENTRIES ARE NOT GENERATED BUT THEY SHOULD HAVE and the other way round
+
+            PROC MEANS DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP3;
+
+            N ID;
+
+            RUN;
+
+                       
+
+     //PROC PRINT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP3; RUN;
+
+ 
+
+     // 3.1. Reviewing amounts for CALL / ROC fund ops
+
+            //CALL TYPE=101 (MF), 201 (IF)
+
+            //ROC TYPE= 102 (MF), 202 (IF)
+
+           
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+ 
+
+            COLUMN CALL_AMOUNT_CHECK TYPE=STRING;
+
+            COLUMN ROC_AMOUNT_CHECK TYPE=STRING;                 
+
+ 
+
+     IF AMOUNT_FUND_CURR<0 AND (TYPE=101 OR TYPE=201) THEN
+
+                        CALL_AMOUNT_CHECK="FALSE";
+
+            ELSE IF AMOUNT_FUND_CURR>0 AND (TYPE=101 OR TYPE=201) THEN
+
+                        CALL_AMOUNT_CHECK="TRUE";
+
+            END;
+
+            END;
+
+                       
+
+     IF AMOUNT_FUND_CURR>0 AND (TYPE=102 OR TYPE=202) THEN
+
+                        ROC_AMOUNT_CHECK="FALSE";
+
+            ELSE IF AMOUNT_FUND_CURR<0 AND (TYPE=102 OR TYPE=202) THEN
+
+                        ROC_AMOUNT_CHECK="TRUE";
+
+            END;
+
+            END;              
+
+ 
+
+            IF ROC_AMOUNT_CHECK="" THEN
+
+                        ROC_AMOUNT_CHECK="N/A";
+
+            END;
+
+                       
+
+            IF CALL_AMOUNT_CHECK="" THEN
+
+                        CALL_AMOUNT_CHECK="N/A";
+
+            END;
+
+                       
+
+            RUN;
+
+                       
+
+     //PROC PRINT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL;RUN;           
+
+ 
+
+     // 3.2. COUNT NUMBER OF ISSUES PER FUND_OP_IQID WHEN: amounts for ROC >0 , amounts for CALL<0
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP4_CALL (KEEP=ID CALL_AMOUNT_CHECK);
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+            IF CALL_AMOUNT_CHECK="FALSE" THEN
+
+                        OUTPUT;
+
+            END;
+
+            RUN;
+
+                       
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP4_ROC (KEEP=ID ROC_AMOUNT_CHECK);
+
+     SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+            IF ROC_AMOUNT_CHECK="FALSE" THEN
+
+                        OUTPUT;
+
+            END;
+
+            RUN;
+
+ 
+
+            // non duplicated occurrences
+
+            PROC SORT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP4_CALL
+
+            NODUPKEY;
+
+            BY ID;
+
+            RUN;
+
+                       
+
+            PROC SORT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP4_ROC
+
+            NODUPKEY;
+
+            BY ID;
+
+            RUN;
+
+                       
+
+            //CALL and ROC AMOUNT ISSUES COUNT: N statement counts number of occurrences. Result in column: ID_N
+
+            PROC MEANS DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP4_CALL;
+
+            N ID;
+
+            RUN;              
+
+                       
+
+            PROC MEANS DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP4_ROC;
+
+            N ID;
+
+            RUN;                          
+
+ 
+
+     //PROC PRINT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP4_CALL; RUN;
+
+     //PROC PRINT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP4_ROC; RUN;  
+
+                       
+
+            // 4.1. Reviewing: Nominal value, Share price – need to be populated for MF: Share Issue /MF: Share Redemption – otherwise script will not work
+
+            // MF: Share Issue, TYPE=150 
+
+     // MF: Share Redemption, TYPE=      151      
+
+     DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+ 
+
+            COLUMN NOM_VALUE_CHECK TYPE=STRING;                    
+
+            COLUMN SHARE_PRICE_CHECK TYPE=STRING;
+
+                       
+
+            IF TYPE=150 OR TYPE=151 THEN
+
+                        IF NOMINAL_VALUE="" THEN
+
+                           NOM_VALUE_CHECK="FALSE";
+
+                        ELSE NOM_VALUE_CHECK="TRUE";
+
+                        END;
+
+            END;
+
+                       
+
+            IF TYPE=150 OR TYPE=151 THEN
+
+                        IF SHARE_PRICE="" THEN
+
+                           SHARE_PRICE_CHECK="FALSE";
+
+                        ELSE SHARE_PRICE_CHECK="TRUE";
+
+                        END;
+
+            END;  
+
+ 
+
+            IF NOM_VALUE_CHECK="" THEN
+
+                        NOM_VALUE_CHECK="N/A";
+
+            END;              
+
+                       
+
+            IF SHARE_PRICE_CHECK="" THEN
+
+                        SHARE_PRICE_CHECK="N/A";
+
+            END;
+
+ 
+
+            RUN;
+
+ 
+
+     //PROC PRINT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL;RUN;                                   
+
+                       
+
+     // 4.2. COUNT NUMBER OF ISSUES PER FUND_OP_IQID WHEN: SHARE_PRICE / NOMINAL_VALUE are empty for MF:SHARE ISSUE / MF: SHARE REDEMPTION
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP5_NOMVALUE (KEEP=ID NOM_VALUE_CHECK);
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+            IF NOM_VALUE_CHECK="FALSE" THEN
+
+                        OUTPUT;
+
+            END;
+
+            RUN;
+
+                       
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP5_SHAREPRICE (KEEP=ID SHARE_PRICE_CHECK);
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+            IF SHARE_PRICE_CHECK="FALSE" THEN
+
+                        OUTPUT;
+
+            END;
+
+            RUN;
+
+ 
+
+            // non duplicated occurrences
+
+            PROC SORT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP5_NOMVALUE
+
+            NODUPKEY;
+
+            BY ID;
+
+            RUN;
+
+                       
+
+            PROC SORT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP5_SHAREPRICE
+
+            NODUPKEY;
+
+            BY ID;
+
+            RUN;
+
+                       
+
+            //NUMBER OF ISSUES: N statement counts number of occurrences. Result in column: ID_N
+
+            PROC MEANS DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP5_NOMVALUE;
+
+            N ID;
+
+            RUN;              
+
+                       
+
+            PROC MEANS DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP5_SHAREPRICE;
+
+            N ID;
+
+            RUN;                                      
+
+ 
+
+     //PROC PRINT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP5_NOMVALUE;RUN;
+
+     //PROC PRINT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP5_SHAREPRICE;RUN;           
+
+                       
+
+     // 5.1. Check if COMMITMENT amount for MF / IF: Commitment / MF: SHARE ISSUE fund op is populated for each investor
+
+            // TYPE for: IF COMMITMENT = 200, MF COMMITMENT = 100, MF SHARE ISSUE = 150
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+            COLUMN COMMITMENT_AMOUNT_CHECK_COMM TYPE=STRING;
+
+            COLUMN COMMITMENT_AMOUNT_CHECK_SHAREISSUE TYPE=STRING;
+
+                       
+
+            IF TYPE=100 OR TYPE=200 THEN
+
+                        IF COMMITMENT="" OR COMMITMENT_SUB_CURR="" THEN
+
+                           COMMITMENT_AMOUNT_CHECK_COMM="FALSE";
+
+                        ELSE COMMITMENT_AMOUNT_CHECK_COMM="TRUE";
+
+                END;
+
+            ELSE IF TYPE=150 THEN
+
+                IF COMMITMENT="" OR COMMITMENT_SUB_CURR="" THEN
+
+                           COMMITMENT_AMOUNT_CHECK_SHAREISSUE="FALSE";
+
+                        ELSE COMMITMENT_AMOUNT_CHECK_SHAREISSUE="TRUE";
+
+                        END;
+
+     END;
+
+            END;
+
+                       
+
+     IF COMMITMENT_AMOUNT_CHECK_COMM="" THEN
+
+                        COMMITMENT_AMOUNT_CHECK_COMM="N/A";
+
+            END;
+
+                       
+
+            IF COMMITMENT_AMOUNT_CHECK_SHAREISSUE="" THEN
+
+                        COMMITMENT_AMOUNT_CHECK_SHAREISSUE="N/A";
+
+            END;
+
+                       
+
+            RUN;
+
+                       
+
+     // 5.2. COUNT NUMBER OF ISSUES PER FUND_OP_IQID WHEN: COMMITMENT amount for MF/IF: Commitment / MF: SHARE ISSUE fund op is NOT populated for some investor
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP6_COMM (KEEP=ID COMMITMENT_AMOUNT_CHECK_COMM);
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+     IF COMMITMENT_AMOUNT_CHECK_COMM="FALSE" THEN
+
+                        OUTPUT;
+
+     END;
+
+     RUN;
+
+                       
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP7_COMM_SI (KEEP=ID COMMITMENT_AMOUNT_CHECK_SHAREISSUE);
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+            IF COMMITMENT_AMOUNT_CHECK_SHAREISSUE="FALSE" THEN
+
+                OUTPUT;
+
+            END;
+
+            RUN;
+
+ 
+
+            // non duplicated occurrences
+
+            PROC SORT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP6_COMM
+
+            NODUPKEY;
+
+            BY ID;
+
+            RUN;
+
+                       
+
+            PROC SORT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP7_COMM_SI
+
+            NODUPKEY;
+
+            BY ID;
+
+            RUN;
+
+                       
+
+            //NUMBER OF ISSUES: N statement counts number of occurrences. Result in column: ID_N
+
+            PROC MEANS DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP6_COMM;
+
+            N ID;
+
+            RUN;              
+
+                       
+
+            PROC MEANS DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP7_COMM_SI;
+
+            N ID;
+
+            RUN;                          
+
+                       
+
+     //PROC PRINT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL; RUN;
+
+                       
+
+            // 6.1. SHARE CAPITAL or SHARE PREMIUM must be always populated for MF: SHARE REDEMPTION / MF: SHARE ISSUE fund op
+
+            // TYPE for MF SHARE REDEMPTION =151 , MF SHARE ISSUE = 150
+
+     DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+            COLUMN SHARECAPITAL_OR_PREMIUM_AMOUNT_CHECK TYPE=STRING;
+
+                                               
+
+            IF TYPE=150 OR TYPE=151 THEN
+
+                        IF SHARE_CAPITAL="" AND SHARE_PREMIUM="" THEN
+
+                           SHARECAPITAL_OR_PREMIUM_AMOUNT_CHECK="FALSE";
+
+                        ELSE SHARECAPITAL_OR_PREMIUM_AMOUNT_CHECK="TRUE";
+
+                        END;
+
+            END;
+
+                       
+
+            IF SHARECAPITAL_OR_PREMIUM_AMOUNT_CHECK="" THEN
+
+                        SHARECAPITAL_OR_PREMIUM_AMOUNT_CHECK="N/A";
+
+            END;
+
+                       
+
+            RUN;
+
+                       
+
+     // 6.2. COUNT NUMBER OF ISSUES PER FUND_OP_IQID WHEN: SHARE CAPITAL or SHARE REDEMPTION IS NOT populated for MF: SHARE REDEMPTION / MF: SHARE ISSUE fund op
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP8_SC_SP (KEEP=ID SHARECAPITAL_OR_PREMIUM_AMOUNT_CHECK);
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+            IF SHARECAPITAL_OR_PREMIUM_AMOUNT_CHECK="FALSE" THEN
+
+                OUTPUT;
+
+            END;
+
+            RUN;
+
+ 
+
+     // non duplicated occurrences
+
+            PROC SORT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP8_SC_SP
+
+            NODUPKEY;
+
+            BY ID;
+
+            RUN;
+
+ 
+
+            //NUMBER OF ISSUES: N statement counts number of occurrences. Result in column: ID_N
+
+            PROC MEANS DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP8_SC_SP;
+
+            N ID;
+
+            RUN;  
+
+ 
+
+            // 7.1. CHECK if any Fund Operation includes investors without any amount populated
+
+     DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+            COLUMN INVESTOR_AMOUNT_CHECK TYPE=STRING;
+
+            COLUMN SUM_OF_ALL_AMOUNTS TYPE=DOUBLE;
+
+                       
+
+            SUM_OF_ALL_AMOUNTS = COMMITMENT + COMMITMENT_SUB_CURR + Amount_Fund_Curr + AMOUNT_SUBSCR_CURR + AMOUNT_SHARE_CURR + CALL_INVESTMENTS + CALL_MNGMT_FEES_IN_COMMITMENT + CALL_PARTNERSHIP_EXP + DISTR_RETURN_OF_CAP +
+
+                          DISTR_REALIZED_GAIN + DISTR_REALIZED_LOSS + DISTR_REDRAWABLE + ADJUST_TO_REMAINING_COMMITMENT + SHARE_CAPITAL + SHARE_PREMIUM + VALUATION_FUND_CURR + VALUATION_SUBSC_CURR +
+
+                          NAV_NET_CONTRIBUTIONS + NAV_INCOME + NAV_MNGMT_FEES + NAV_OTHER_EXP + NAV_Realised_Gain_Loss + NAV_Unrealised_Gain_Loss +
+
+                          NAV_INVESTMENTS_AT_COSTS + NAV_NET_CASH_OTHER_ASSETS + GL_COST + GL_UNREALIZED_INVESTMENT_GAIN_LOSS + GL_UNREALIZED_FX_GAIN_LOSS +
+
+                          GL_REALIZED_INVESTMENT_GAIN_LOSS + GL_REALIZED_FX_GAIN_LOSS + Fund_Sec_Purchase_Price + SEC_PURCHASE_PRICE + INVESTOR_SEC_PURCHASE_PRICE;
+
+                                               
+
+     IF SUM_OF_ALL_AMOUNTS ="" or SUM_OF_ALL_AMOUNTS=0 THEN
+
+                        INVESTOR_AMOUNT_CHECK = "FALSE";
+
+     ELSE INVESTOR_AMOUNT_CHECK = "TRUE";
+
+            END;
+
+     RUN;
+
+                       
+
+            // 7.2. COUNT NUMBER OF ISSUES PER FUND_OP_IQID WHEN: any Fund Operation includes investors without any amount populated
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP9_INV_AMOUNT_CHECK (KEEP=ID INVESTOR_AMOUNT_CHECK);
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+            IF INVESTOR_AMOUNT_CHECK="FALSE" THEN
+
+                        OUTPUT;
+
+            END;
+
+            RUN;
+
+ 
+
+            // non duplicated occurrences
+
+            PROC SORT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP9_INV_AMOUNT_CHECK
+
+            NODUPKEY;
+
+            BY ID;
+
+            RUN;
+
+ 
+
+            //NUMBER OF ISSUES: N statement counts number of occurrences. Result in column: ID_N
+
+            PROC MEANS DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP9_INV_AMOUNT_CHECK;
+
+            N ID;
+
+            RUN;  
+
+                       
+
+                                   
+
+            //  8.1. For any Share added to a Fund Operation, there are no amounts populated for investors
+
+                       
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+            COLUMN FUNDOPID_SHARE TYPE=STRING;
+
+            FUNDOPID_SHARE = ID & COMPLETE_SHARE_NAME;
+
+                       
+
+            RUN;
+
+                       
+
+            PROC MEANS DATA=WORK.T_FUND_OP_INVESTOR_LEVEL
+
+            OUT=WORK.T_FUND_OP_INVESTOR_LEVEL_CHECK_SHARE_AMNTS;
+
+            CLASS FUNDOPID_SHARE;   
+
+     SUM SUM_OF_ALL_AMOUNTS (NAME=SUM_OF_ALL_AMOUNTS_PER_SHARE);
+
+     RUN;                      
+
+                       
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL_CHECK_SHARE_AMNTS;
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL_CHECK_SHARE_AMNTS;
+
+                       
+
+            COLUMN AMOUNT_CHECK_PER_SHARE TYPE=STRING;
+
+                       
+
+            IF SUM_OF_ALL_AMOUNTS_PER_SHARE=0 THEN
+
+                AMOUNT_CHECK_PER_SHARE="FALSE";
+
+            ELSE
+
+                AMOUNT_CHECK_PER_SHARE="TRUE";
+
+            END;              
+
+            RUN;
+
+                       
+
+     DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+     MERGE WORK.T_FUND_OP_INVESTOR_LEVEL  (IN = T1)  WORK.T_FUND_OP_INVESTOR_LEVEL_CHECK_SHARE_AMNTS(IN = T2);
+
+     BY FUNDOPID_SHARE;
+
+     _OUTPUT_ = T1;
+
+     RUN;
+
+                       
+
+     //to get rid of situations that summing per share gives 0 from not zero amounts per investors
+
+            DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+            IF INVESTOR_AMOUNT_CHECK="TRUE" AND AMOUNT_CHECK_PER_SHARE="FALSE" THEN
+
+            AMOUNT_CHECK_PER_SHARE="TRUE";
+
+            END;
+
+            RUN;
+
+                                   
+
+            // 8.2. COUNT NUMBER OF ISSUES PER FUND_OP_IQID
+
+     DATA WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP10_AMNT_PER_SHARE (KEEP=ID AMOUNT_CHECK_PER_SHARE);
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+            IF AMOUNT_CHECK_PER_SHARE="FALSE" THEN
+
+                        OUTPUT;
+
+            END;
+
+            RUN;
+
+ 
+
+            // non duplicated occurrences
+
+     PROC SORT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP10_AMNT_PER_SHARE
+
+            NODUPKEY;
+
+            BY ID;
+
+            RUN;
+
+ 
+
+            //NUMBER OF ISSUES: N statement counts number of occurrences. Result in column: ID_N
+
+            PROC MEANS DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP10_AMNT_PER_SHARE;
+
+            N ID;
+
+            RUN;              
+
+ 
+
+     // 9.1. Check if both amounts are populated:  amount in fund currency or amount in investor currency, check fx calculation
+
+     DATA WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+     COLUMN AMOUNT_FUND_CCY_VS_INV_CCY_CHECK TYPE=STRING;
+
+                       
+
+            IF AMOUNT_FUND_CURR<>"" AND FX_RATE_FUND_SUBSCR="" AND AMOUNT_FUND_CURR=AMOUNT_SUBSCR_CURR THEN
+
+                        AMOUNT_FUND_CCY_VS_INV_CCY_CHECK="TRUE";
+
+            ELSE IF AMOUNT_FUND_CURR<>"" AND FX_RATE_FUND_SUBSCR="" AND AMOUNT_FUND_CURR<>AMOUNT_SUBSCR_CURR THEN
+
+                        AMOUNT_FUND_CCY_VS_INV_CCY_CHECK="FALSE";
+
+            END;  
+
+            END;
+
+                       
+
+            IF AMOUNT_FUND_CURR="" OR AMOUNT_FUND_CURR=0 THEN
+
+                        IF AMOUNT_SUBSCR_CURR="" OR AMOUNT_SUBSCR_CURR=0 THEN
+
+                           AMOUNT_FUND_CCY_VS_INV_CCY_CHECK="TRUE";
+
+                        ELSE IF AMOUNT_SUBSCR_CURR<>"" AND AMOUNT_SUBSCR_CURR<>0 THEN
+
+                           AMOUNT_FUND_CCY_VS_INV_CCY_CHECK="FALSE";
+
+                        END;   
+
+                        END;
+
+            END;
+
+                       
+
+            IF AMOUNT_FUND_CURR<>"" AND AMOUNT_FUND_CURR<>0 AND FX_RATE_FUND_SUBSCR<>"" THEN
+
+                        IF ROUND(AMOUNT_FUND_CURR*FX_RATE_FUND_SUBSCR,2)<>AMOUNT_SUBSCR_CURR THEN
+
+                           AMOUNT_FUND_CCY_VS_INV_CCY_CHECK="FALSE";
+
+                        ELSE
+
+                           AMOUNT_FUND_CCY_VS_INV_CCY_CHECK="TRUE";
+
+                        END;
+
+            END;
+
+ 
+
+            RUN;
+
+                       
+
+     // 9.2. COUNT NUMBER OF ISSUES PER FUND_OP_IQID
+
+             DATA WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP11_AMNT_CURR_CHECK(KEEP=ID AMOUNT_FUND_CCY_VS_INV_CCY_CHECK);
+
+            SET WORK.T_FUND_OP_INVESTOR_LEVEL;
+
+                       
+
+            IF AMOUNT_FUND_CCY_VS_INV_CCY_CHECK="FALSE" THEN
+
+                OUTPUT;
+
+            END;
+
+            RUN;
+
+ 
+
+            // non duplicated occurrences
+
+            PROC SORT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP11_AMNT_CURR_CHECK
+
+            NODUPKEY;
+
+            BY ID;
+
+            RUN;
+
+ 
+
+            //NUMBER OF ISSUES: N statement counts number of occurrences. Result in column: ID_N
+
+            PROC MEANS DATA=WORK.T_FUND_OP_INVESTOR_LEVEL_TEMP11_AMNT_CURR_CHECK;
+
+            N ID;
+
+            RUN;                          
+
+                       
+
+     //PROC PRINT DATA=WORK.T_FUND_OP_INVESTOR_LEVEL; RUN;                       
+
+ 
+
+%ELSE
+
+                             
+
+     %DEFINE TABLE_TOO_LARGE;
+
+               
+
+     //DISPLAY INFO TO THE USER
+
+     DATA WORK.T_ERROR;
+
+      
+
+     COLUMN MESSAGE TYPE = STRING;
+
+               
+
+     MESSAGE = "OUTPUT TABLE IS TOO LARGE TO PROCESS IT (>=200 000 rows), PLEASE LIMIT THE OUTPUT BY USING FILTERS";
+
+     OUTPUT;
+
+       
+
+     RUN;        
+
+           
+
+%END;
+
+ 
